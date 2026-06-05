@@ -6,9 +6,9 @@
 # a dependent's content_id is returned whether or not it has a renderable
 # edition, so this resolver reads the `links` table directly rather than the
 # edition-joining batch SQL the expander uses. Edition links are only relevant
-# at the root (child levels follow link set links only, exactly as legacy does),
-# so the root reuses the existing Queries::Links / Queries::EditionLinks and the
-# recursive levels batch plain `links`-table reads. See PLAN.md / ADR-014.
+# at the root (child levels follow link set links only), so the root reuses the
+# existing Queries::Links / Queries::EditionLinks and the recursive levels batch
+# plain `links`-table reads. See PLAN.md / ADR-014.
 class DependencyResolution::BreadthFirstResolver
   Node = Data.define(:content_id, :link_types_path, :ancestors, :terminal)
 
@@ -20,8 +20,8 @@ class DependencyResolution::BreadthFirstResolver
 
   def dependencies
     @dependencies = []
-    # Level-1 nodes reached via edition links are "terminal": legacy never
-    # expands their children (it doesn't support nested edition links).
+    # Level-1 nodes reached via edition links are "terminal": their children are
+    # never expanded (we don't support nested edition links).
     frontier = expand_root.reject(&:terminal)
     frontier = expand_level(frontier) until frontier.empty?
     @dependencies.uniq
@@ -78,7 +78,7 @@ private
         dependency = link[:content_id]
         @dependencies << dependency
         # Level-1 nodes carry empty ancestors (the root is never a cycle
-        # ancestor, mirroring legacy where level-1 nodes have no parent).
+        # ancestor, so it can legitimately reappear deeper in the graph).
         frontier << Node.new(
           content_id: dependency,
           link_types_path: [link_type],

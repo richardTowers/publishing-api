@@ -29,8 +29,9 @@ class LinkExpansion::BreadthFirstExpander
 
   def links_with_content
     root_links = {}
-    # Level-1 nodes include "terminal" ones reached via edition links: legacy
-    # never expands their children, but auto_reverse_link still applies to them.
+    # Level-1 nodes include "terminal" ones reached via edition links: their
+    # children are never expanded (we don't support nested edition links), but
+    # auto_reverse_link still applies to them.
     level_one_nodes = expand_root(root_links)
     apply_auto_reverse_links(level_one_nodes)
 
@@ -82,7 +83,7 @@ private
 
     next_frontier = []
 
-    # Root key order matches legacy: reverse links, then direct links.
+    # Root key order: reverse links, then direct links.
     # Level-1 nodes carry empty ancestors: the root is never treated as a cycle
     # ancestor, so it can legitimately reappear deeper in the tree.
     reverse_types.each do |reverse_type|
@@ -121,7 +122,7 @@ private
       reverse_types = rules.link_expansion.allowed_reverse_link_types(node.link_types_path)
 
       # edition_id is NULL for non-root nodes: edition links are only followed
-      # at the root (a deliberate legacy-preserving choice).
+      # at the root (we don't support nested edition links).
       child_ids = EditionAndContentId.new(nil, node.content_id)
       direct_types.each { |type| forward_input << [child_ids, type.to_s] }
       reverse_types.each do |reverse_type|
@@ -139,7 +140,7 @@ private
     next_frontier = []
     node_types.each do |node, direct_types, reverse_types|
       child_ancestors = node.ancestors + [node.content_id]
-      # Child key order matches legacy: direct links, then reverse links.
+      # Child key order: direct links, then reverse links.
       direct_types.each do |type|
         editions = forward_results.fetch([node.content_id, type.to_s], [])
         attach(node.links, next_frontier, node.link_types_path, child_ancestors, type, editions)
@@ -169,11 +170,11 @@ private
   # via an edition link) push a child frontier node so its links expand too.
   #
   # `child_ancestors` is the set of content_ids the children must avoid (the
-  # parent's own ancestors plus the parent itself), reproducing legacy's
-  # per-path cycle pruning. `parent_path` is the parent node's link_types_path.
+  # parent's own ancestors plus the parent itself), giving per-path cycle
+  # pruning. `parent_path` is the parent node's link_types_path.
   #
-  # Legacy only follows edition links at the root and never expands the children
-  # of a node reached via an edition link ("we don't support nested edition
+  # Edition links are only followed at the root; the children of a node reached
+  # via an edition link are never expanded ("we don't support nested edition
   # links"). At child levels the forward query passes edition_id: NULL so no
   # edition links come back; the reverse query has no such lever, so we drop
   # edition-sourced rows here when `child_reverse` is set.
@@ -261,8 +262,8 @@ private
     @root_edition_hash = if root_edition.nil?
                            nil
                          elsif edition
-                           # by_edition: use the in-memory edition as-is, matching
-                           # legacy (which preloads the passed edition object).
+                           # by_edition: use the in-memory edition as-is (the
+                           # caller passed a fully-loaded edition object).
                            LinkExpansion::EditionHash.from(edition)
                          else
                            hash = LinkExpansion::EditionHash.from(root_edition)
