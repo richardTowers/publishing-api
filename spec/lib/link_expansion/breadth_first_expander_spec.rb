@@ -10,7 +10,7 @@ RSpec.describe LinkExpansion::BreadthFirstExpander do
     described_class.new(content_id:, locale: "en", with_drafts:).links_with_content
   end
 
-  describe "parity with the legacy expander" do
+  describe "traversal structure" do
     before do
       create_edition(a, "/a", factory: :draft_edition)
       create_edition(b, "/b", factory: :draft_edition)
@@ -18,28 +18,31 @@ RSpec.describe LinkExpansion::BreadthFirstExpander do
       create_edition(d, "/d", factory: :draft_edition)
     end
 
-    it "matches the legacy output for a multi-level recursive chain" do
+    it "expands a multi-level recursive chain to its full depth" do
       create_link(a, b, "parent")
       create_link(b, c, "parent")
       create_link(c, d, "parent")
 
-      legacy = LinkExpansion.new(content_id: a, locale: "en", with_drafts: true)
-      legacy_output = legacy.send(:populate_links, legacy.link_graph.links)
-
-      expect(expand(a)).to eq(legacy_output)
+      expect(expand(a)[:parent]).to match([
+        a_hash_including(base_path: "/b", links: {
+          parent: [a_hash_including(base_path: "/c", links: {
+            parent: [a_hash_including(base_path: "/d", links: {})],
+          })],
+        }),
+      ])
     end
 
-    it "matches legacy for a cycle (per-path ancestor pruning, not a global visited set)" do
+    it "prunes cycles per-path, not with a global visited set" do
       create_link(a, b, "parent")
       create_link(b, a, "parent")
 
-      legacy = LinkExpansion.new(content_id: a, locale: "en", with_drafts: true)
-      legacy_output = legacy.send(:populate_links, legacy.link_graph.links)
-
-      result = expand(a)
-      expect(result).to eq(legacy_output)
-      # the root reappears one level deep, with its own children pruned
-      expect(result[:parent][0][:links][:parent][0][:links]).to eq({})
+      # the root reappears one level deep as b's parent, with its own children
+      # pruned (a global visited set would have excluded it entirely)
+      expect(expand(a)[:parent]).to match([
+        a_hash_including(base_path: "/b", links: {
+          parent: [a_hash_including(base_path: "/a", links: {})],
+        }),
+      ])
     end
   end
 

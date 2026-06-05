@@ -1,10 +1,9 @@
-# Breadth-first reimplementation of link expansion.
+# Breadth-first link expansion.
 #
-# Produces the same `links_with_content` output as the legacy depth-first
-# LinkGraph traversal, but using the two batch SQL queries shared with the
-# GraphQL API (Queries::LinkedToEditions / Queries::ReverseLinkedToEditions).
-# Instead of one query per node, it issues a small fixed number of queries per
-# level of the link graph (O(depth) rather than O(nodes)).
+# Builds the `links_with_content` tree using the two batch SQL queries shared
+# with the GraphQL API (Queries::LinkedToEditions / ReverseLinkedToEditions).
+# It walks the link graph one level at a time, issuing a small fixed number of
+# queries per level (O(depth)) rather than one query per node (O(nodes)).
 #
 # See docs/link-expansion.md and the design notes in the ADR for the tricky
 # bits (per-path cycle filtering, root link-type discovery, edition links only
@@ -84,8 +83,8 @@ private
     next_frontier = []
 
     # Root key order matches legacy: reverse links, then direct links.
-    # Level-1 nodes carry empty ancestors (the root is never a cycle ancestor,
-    # mirroring legacy where level-1 LinkGraph nodes have no parent).
+    # Level-1 nodes carry empty ancestors: the root is never treated as a cycle
+    # ancestor, so it can legitimately reappear deeper in the tree.
     reverse_types.each do |reverse_type|
       editions = reverse_editions(reverse_results, content_id, reverse_type)
       attach(root_links, next_frontier, [], [], reverse_type, editions)

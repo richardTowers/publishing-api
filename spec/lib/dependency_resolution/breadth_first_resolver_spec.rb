@@ -7,7 +7,7 @@ RSpec.describe DependencyResolution::BreadthFirstResolver do
     described_class.new(content_id, locale: "en", with_drafts:).dependencies
   end
 
-  it "matches the legacy resolver for a multi-level reverse chain (child_taxons)" do
+  it "resolves a multi-level reverse chain (child_taxons) to its full depth" do
     a = SecureRandom.uuid
     b = SecureRandom.uuid
     c = SecureRandom.uuid
@@ -16,9 +16,6 @@ RSpec.describe DependencyResolution::BreadthFirstResolver do
     create_link_set(a, links_hash: { parent_taxons: [b] })
     create_link_set(b, links_hash: { parent_taxons: [c] })
 
-    legacy = DependencyResolution.new(content_id, locale: "en", with_drafts: true).link_graph.links_content_ids
-
-    expect(resolve).to match_array(legacy)
     expect(resolve).to match_array([a, b, c])
   end
 

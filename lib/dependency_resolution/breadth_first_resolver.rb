@@ -1,6 +1,5 @@
-# Breadth-first reimplementation of dependency resolution ("link expansion in
-# reverse"). Produces the same flat Array of dependent content_ids as the legacy
-# depth-first LinkGraph traversal, but resolving each level of the graph with a
+# Breadth-first dependency resolution ("link expansion in reverse"). Returns a
+# flat Array of dependent content_ids, resolving each level of the graph with a
 # small fixed number of queries (O(depth)) rather than one query per node.
 #
 # Unlike link expansion, dependency resolution works purely on the links graph:
