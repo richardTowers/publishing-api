@@ -5,11 +5,12 @@
 # The concept is documented in /docs/link-expansion.md
 #
 class LinkExpansion
-  # Selects the link expansion implementation. Defaults to the legacy
-  # depth-first LinkGraph traversal; set LINK_EXPANSION_IMPLEMENTATION=new to use
-  # the breadth-first batch-SQL expander. See PLAN.md / ADR-014.
+  # Selects the link expansion implementation. Defaults to the breadth-first
+  # batch-SQL expander; set LINK_EXPANSION_IMPLEMENTATION=legacy to fall back to
+  # the legacy depth-first LinkGraph traversal (kept for one release for
+  # rollback). See PLAN.md / ADR-014.
   def self.implementation
-    ENV.fetch("LINK_EXPANSION_IMPLEMENTATION", "legacy").to_sym
+    ENV.fetch("LINK_EXPANSION_IMPLEMENTATION", "new").to_sym
   end
 
   def self.by_edition(edition, with_drafts: false)
