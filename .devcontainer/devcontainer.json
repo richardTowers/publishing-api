@@ -1,0 +1,13 @@
+{
+  "name": "Ruby",
+  "dockerComposeFile": "compose.yaml",
+  "service": "app",
+  "workspaceFolder": "/IdeaProjects/publishing-api",
+  "postCreateCommand": "git clone https://github.com/richardtowers/dotfiles.git ~/dotfiles && ~/dotfiles/install.sh --patch-bash-for-idea && pip install --break-system-packages -r requirements.txt",
+  "features": {
+    "ghcr.io/richardtowers/devcontainers/claude-code:latest": {},
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.14"
+    }
+  }
+}
