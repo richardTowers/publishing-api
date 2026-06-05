@@ -5,6 +5,13 @@
 # The concept is documented in /docs/link-expansion.md
 #
 class LinkExpansion
+  # Selects the link expansion implementation. Defaults to the legacy
+  # depth-first LinkGraph traversal; set LINK_EXPANSION_IMPLEMENTATION=new to use
+  # the breadth-first batch-SQL expander. See PLAN.md / ADR-014.
+  def self.implementation
+    ENV.fetch("LINK_EXPANSION_IMPLEMENTATION", "legacy").to_sym
+  end
+
   def self.by_edition(edition, with_drafts: false)
     new(edition:, with_drafts:)
   end
@@ -19,7 +26,20 @@ class LinkExpansion
   end
 
   def links_with_content
+    if self.class.implementation == :new
+      return breadth_first_expander.links_with_content
+    end
+
     populate_links(link_graph.links)
+  end
+
+  def breadth_first_expander
+    @breadth_first_expander ||= LinkExpansion::BreadthFirstExpander.new(
+      edition: options[:edition],
+      content_id: options[:content_id],
+      locale: options[:edition] ? nil : options[:locale],
+      with_drafts:,
+    )
   end
 
   def link_graph
