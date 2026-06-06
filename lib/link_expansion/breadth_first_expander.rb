@@ -7,7 +7,7 @@
 #
 # See docs/link-expansion.md and the design notes in the ADR for the tricky
 # bits (per-path cycle filtering, root link-type discovery, edition links only
-# at root, reverse re-keying, and the withdrawn override).
+# at root, and reverse re-keying).
 class LinkExpansion::BreadthFirstExpander
   # A node we have already emitted into the output tree and whose children we
   # still need to find. `links` is a reference to the emitted `links: {}` hash
@@ -232,18 +232,7 @@ private
   end
 
   def expand_fields(edition, link_type)
-    rules.expand_fields(sql_edition_hash(edition), link_type:, draft: with_drafts)
-  end
-
-  # An EditionHash for an edition sourced from the batch SQL. Such editions only
-  # come back unpublished when they are a genuine withdrawal (the SQL enforces
-  # unpublishings.type = 'withdrawal') and don't carry the "unpublishings.type"
-  # column EditionHash derives `withdrawn` from, so set it explicitly. NOT used
-  # for a caller-supplied edition (by_edition), which carries the real column.
-  def sql_edition_hash(edition)
-    hash = LinkExpansion::EditionHash.from(edition)
-    hash[:withdrawn] = edition.state == "unpublished"
-    hash
+    rules.expand_fields(LinkExpansion::EditionHash.from(edition), link_type:, draft: with_drafts)
   end
 
   # --- auto_reverse_link ------------------------------------------------------
@@ -289,21 +278,19 @@ private
     )
     return nil if edition_ids.blank?
 
-    Edition.with_document.find_by(id: edition_ids.first)
+    # Select unpublishings.type so EditionHash can derive `withdrawn` itself,
+    # the same way the batch SQL does for non-root editions.
+    Edition.with_document.with_unpublishing
+      .select("editions.*", 'unpublishings.type AS "unpublishings.type"')
+      .find_by(id: edition_ids.first)
   end
 
   def root_edition_hash
     return @root_edition_hash if defined?(@root_edition_hash)
 
-    @root_edition_hash = if root_edition.nil?
-                           nil
-                         elsif edition
-                           # by_edition: use the in-memory edition as-is (the
-                           # caller passed a fully-loaded edition object).
-                           LinkExpansion::EditionHash.from(edition)
-                         else
-                           # by_content_id: root edition came from the database.
-                           sql_edition_hash(root_edition)
-                         end
+    # `withdrawn` is derived from root_edition's unpublishings.type column,
+    # selected by load_root_edition (by_content_id) or carried by the
+    # caller-supplied edition (by_edition).
+    @root_edition_hash = LinkExpansion::EditionHash.from(root_edition)
   end
 end
