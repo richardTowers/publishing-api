@@ -9,12 +9,19 @@
 # bits (per-path cycle filtering, root link-type discovery, edition links only
 # at root, and reverse re-keying).
 class LinkExpansion::BreadthFirstExpander
-  # A node we have already emitted into the output tree and whose children we
-  # still need to find. `links` is a reference to the emitted `links: {}` hash
-  # so children attach into the tree top-down. Because that referenced hash is
-  # mutated as children attach, a Node's value-based hash is unstable: never use
-  # a Node as a Hash key or Set member.
-  Node = Data.define(:content_id, :link_type, :link_types_path, :ancestors, :links, :terminal)
+  # A node in the expansion tree whose children we still need to find, which
+  # also serves as the parent we attach a level's editions into. `links` is the
+  # emitted `links: {}` hash, so children attach top-down. `excluded_content_ids`
+  # are the content_ids on the path so far (including this node), used to prune
+  # cycles. The root is the top node: empty path, nothing excluded, `links` is
+  # the output root — so the root (never on the path) can reappear deeper.
+  # `link_type`/`terminal` record the edge that reached the node (nil/false for
+  # the root) and are read only for the level-1 nodes (auto-reverse linking and
+  # the terminal filter).
+  #
+  # Because `links` is mutated as children attach, a Node's value-based hash is
+  # unstable: never use a Node as a Hash key or Set member.
+  Node = Data.define(:content_id, :link_type, :link_types_path, :excluded_content_ids, :links, :terminal)
 
   # Minimal query input: responds to #id (the edition id, may be nil) and
   # #content_id, like an Edition does.
@@ -25,15 +32,6 @@ class LinkExpansion::BreadthFirstExpander
   # distributing the results. Holds a Node, so the same "never use as a Hash
   # key or Set member" caveat applies.
   LevelTypes = Data.define(:node, :direct_types, :reverse_types)
-
-  # The parent that a level's editions attach into: the destination `links`
-  # hash, the `content_id` whose results we distribute, the parent's link-type
-  # `parent_path` (children extend it), and the `child_ancestors` used to prune
-  # cycles. Built for the root (empty path and ancestors, so the root is never a
-  # cycle ancestor) and for each frontier node, which lets the root and the child
-  # levels share attach_direct/attach_reverse. Holds the mutable `links` hash, so
-  # the same "never use as a Hash key or Set member" caveat applies.
-  AttachTarget = Data.define(:links, :content_id, :parent_path, :child_ancestors)
 
   def initialize(edition: nil, content_id: nil, locale: nil, with_drafts: false)
     @edition = edition
@@ -96,9 +94,17 @@ private
 
     next_frontier = []
 
-    # The root carries empty parent_path and child_ancestors: it is never treated
-    # as a cycle ancestor, so it can legitimately reappear deeper in the tree.
-    root = AttachTarget.new(links: root_links, content_id:, parent_path: [], child_ancestors: [])
+    # The root is the top node: empty path, nothing excluded (it is never on the
+    # path, so it can reappear deeper), and root_links as its links hash. It has
+    # no incoming edge, hence nil link_type and terminal: false.
+    root = Node.new(
+      content_id:,
+      link_type: nil,
+      link_types_path: [],
+      excluded_content_ids: [],
+      links: root_links,
+      terminal: false,
+    )
 
     # Root key order: reverse links, then direct links. Edition links are
     # followed at the root, so reverse attachment here keeps edition-sourced rows
@@ -146,39 +152,34 @@ private
     next_frontier = []
     level_types.each do |level_type|
       node = level_type.node
-      target = AttachTarget.new(
-        links: node.links,
-        content_id: node.content_id,
-        parent_path: node.link_types_path,
-        child_ancestors: node.ancestors + [node.content_id],
-      )
-      # Child key order: direct links, then reverse links. Edition links are not
-      # followed below the root, so reverse attachment drops edition-sourced rows
-      # (child_reverse: true).
-      attach_direct(target, level_type.direct_types, forward_results, next_frontier)
-      attach_reverse(target, level_type.reverse_types, reverse_results, next_frontier, child_reverse: true)
+      # The node is itself the parent we attach into. Child key order: direct
+      # links, then reverse links. Edition links are not followed below the root,
+      # so reverse attachment drops edition-sourced rows (child_reverse: true).
+      attach_direct(node, level_type.direct_types, forward_results, next_frontier)
+      attach_reverse(node, level_type.reverse_types, reverse_results, next_frontier, child_reverse: true)
     end
 
     next_frontier
   end
 
-  # Distribute the forward-query results for one parent over its direct link
+  # Distribute the forward-query results for one parent node over its direct link
   # types. Shared by the root and the child levels; the type may arrive as a
   # string (root, from pluck) or a symbol (children), hence the to_s/to_sym.
-  def attach_direct(target, direct_types, forward_results, next_frontier)
+  def attach_direct(parent, direct_types, forward_results, next_frontier)
     direct_types.each do |type|
-      editions = forward_results.fetch([target.content_id, type.to_s], [])
-      attach(target, next_frontier, type.to_sym, editions)
+      editions = forward_results.fetch([parent.content_id, type.to_s], [])
+      attach(parent, next_frontier, type.to_sym, editions)
     end
   end
 
-  # Distribute the reverse-query results for one parent over its reverse link
-  # types. Shared by the root and the child levels; child_reverse is true below
-  # the root, where edition-sourced rows must be dropped (no nested edition links).
-  def attach_reverse(target, reverse_types, reverse_results, next_frontier, child_reverse:)
+  # Distribute the reverse-query results for one parent node over its reverse
+  # link types. Shared by the root and the child levels; child_reverse is true
+  # below the root, where edition-sourced rows must be dropped (no nested edition
+  # links).
+  def attach_reverse(parent, reverse_types, reverse_results, next_frontier, child_reverse:)
     reverse_types.each do |reverse_type|
-      editions = reverse_editions(reverse_results, target.content_id, reverse_type)
-      attach(target, next_frontier, reverse_type, editions, child_reverse:)
+      editions = reverse_editions(reverse_results, parent.content_id, reverse_type)
+      attach(parent, next_frontier, reverse_type, editions, child_reverse:)
     end
   end
 
@@ -206,8 +207,8 @@ private
   # nothing survives: an absent key is meaningful and distinct from an empty [].
   # A node reached via an edition link is marked terminal so its children are not
   # expanded.
-  def attach(target, next_frontier, link_type, editions, child_reverse: false)
-    survivors = survivors_for(editions, target.child_ancestors, child_reverse:)
+  def attach(parent, next_frontier, link_type, editions, child_reverse: false)
+    survivors = survivors_for(editions, parent.excluded_content_ids, child_reverse:)
     return if survivors.empty?
 
     # Each survivor's child_links hash is shared between its frontier Node and its
@@ -218,30 +219,30 @@ private
       next_frontier << Node.new(
         content_id: edition.content_id,
         link_type:,
-        link_types_path: target.parent_path + [link_type],
-        ancestors: target.child_ancestors,
+        link_types_path: parent.link_types_path + [link_type],
+        excluded_content_ids: parent.excluded_content_ids + [edition.content_id],
         links: child_links,
         terminal: edition_link_sourced?(edition),
       )
     end
 
-    target.links[link_type] = survivors_with_links.map do |edition, child_links|
+    parent.links[link_type] = survivors_with_links.map do |edition, child_links|
       expand_fields(edition, link_type).merge(links: child_links)
     end
   end
 
   # The editions to actually attach. Per-path cycle pruning drops any whose
-  # content_id is already on this path: `child_ancestors` is the parent's own
-  # ancestors plus the parent itself.
+  # content_id is already on this path: `excluded_content_ids` is the parent's,
+  # which already includes the parent itself.
   #
   # Edition links are only followed at the root, so the children of a node
   # reached via an edition link are never expanded ("no nested edition links").
   # The child-level forward query enforces this by passing edition_id: NULL; the
   # reverse query has no such lever, so we drop edition-sourced rows here when
   # `child_reverse` is set.
-  def survivors_for(editions, child_ancestors, child_reverse:)
+  def survivors_for(editions, excluded_content_ids, child_reverse:)
     editions = editions.reject { |edition| edition_link_sourced?(edition) } if child_reverse
-    editions.reject { |edition| child_ancestors.include?(edition.content_id) }
+    editions.reject { |edition| excluded_content_ids.include?(edition.content_id) }
   end
 
   def edition_link_sourced?(edition)

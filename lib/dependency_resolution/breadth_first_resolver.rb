@@ -10,7 +10,7 @@
 # existing Queries::Links / Queries::EditionLinks and the recursive levels batch
 # plain `links`-table reads. See PLAN.md / ADR-014.
 class DependencyResolution::BreadthFirstResolver
-  Node = Data.define(:content_id, :link_types_path, :ancestors, :terminal)
+  Node = Data.define(:content_id, :link_types_path, :excluded_content_ids, :terminal)
 
   def initialize(content_id, locale:, with_drafts: false)
     @content_id = content_id
@@ -77,12 +77,13 @@ private
       links.each do |link|
         dependency = link[:content_id]
         @dependencies << dependency
-        # Level-1 nodes carry empty ancestors (the root is never a cycle
-        # ancestor, so it can legitimately reappear deeper in the graph).
+        # A level-1 node excludes only itself; the root's content_id is never
+        # added to any exclusion set, so it can legitimately reappear deeper in
+        # the graph.
         frontier << Node.new(
           content_id: dependency,
           link_types_path: [link_type],
-          ancestors: [],
+          excluded_content_ids: [dependency],
           terminal:,
         )
       end
@@ -108,15 +109,13 @@ private
 
     next_frontier = []
     frontier.each do |node|
-      child_ancestors = node.ancestors + [node.content_id]
-
       # "Direct" dependencies: things linking to this node. The path-facing link
       # type is the stored (incoming) type.
       allowed_direct = dr.allowed_direct_link_types(node.link_types_path).map(&:to_s)
       incoming.fetch(node.content_id, []).each do |(_target, link_type, source)|
         next unless allowed_direct.include?(link_type)
 
-        add_dependency(next_frontier, source, node.link_types_path, child_ancestors, link_type.to_sym)
+        add_dependency(next_frontier, source, node, link_type.to_sym)
       end
 
       # "Reverse" dependencies: things this node links to that reciprocate. The
@@ -126,7 +125,7 @@ private
         reverse_name = reverse_name_for[link_type]
         next unless reverse_name
 
-        add_dependency(next_frontier, target, node.link_types_path, child_ancestors, reverse_name)
+        add_dependency(next_frontier, target, node, reverse_name)
       end
     end
 
@@ -143,14 +142,14 @@ private
     end
   end
 
-  def add_dependency(frontier, dependency, parent_path, child_ancestors, link_type)
-    return if child_ancestors.include?(dependency)
+  def add_dependency(frontier, dependency, parent, link_type)
+    return if parent.excluded_content_ids.include?(dependency)
 
     @dependencies << dependency
     frontier << Node.new(
       content_id: dependency,
-      link_types_path: parent_path + [link_type],
-      ancestors: child_ancestors,
+      link_types_path: parent.link_types_path + [link_type],
+      excluded_content_ids: parent.excluded_content_ids + [dependency],
       terminal: false,
     )
   end
