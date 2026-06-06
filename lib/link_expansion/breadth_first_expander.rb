@@ -39,7 +39,7 @@ class LinkExpansion::BreadthFirstExpander
     # children are never expanded (we don't support nested edition links), but
     # auto_reverse_link still applies to them.
     level_one_nodes = expand_root(root_links)
-    apply_auto_reverse_links(level_one_nodes)
+    LinkExpansion::AutoReverseLinker.new(root_edition:, with_drafts:).apply(level_one_nodes)
 
     frontier = level_one_nodes.reject(&:terminal)
     frontier = expand_level(frontier) until frontier.empty?
@@ -235,53 +235,19 @@ private
     rules.expand_fields(LinkExpansion::EditionHash.from(edition), link_type:, draft: with_drafts)
   end
 
-  # --- auto_reverse_link ------------------------------------------------------
-
-  def apply_auto_reverse_links(level_one_nodes)
-    root_edition_hash = LinkExpansion::EditionHash.from(root_edition)
-    return unless root_edition_hash
-
-    level_one_nodes.each do |node|
-      reverse_type = node.link_type
-      next unless rules.is_reverse_link_type?(reverse_type)
-      next unless should_link?(reverse_type, root_edition_hash)
-
-      rules.reverse_to_direct_link_type(reverse_type).each do |direct|
-        expanded = rules.expand_fields(root_edition_hash, link_type: direct, draft: with_drafts)
-        node.links[direct] = [expanded.merge(links: {})]
-      end
-    end
-  end
-
-  def should_link?(link_type, edition_hash)
-    Link::PERMITTED_UNPUBLISHED_LINK_TYPES.include?(link_type.to_s) ||
-      edition_hash[:state] != "unpublished"
-  end
-
   # --- root edition resolution (decision 7) -----------------------------------
 
   def root_edition
-    return @root_edition if defined?(@root_edition)
-
-    @root_edition = edition || load_root_edition
+    root_edition_resolver.edition
   end
 
   def root_edition_id
-    root_edition&.id
+    root_edition_resolver.id
   end
 
-  def load_root_edition
-    edition_ids = Queries::GetEditionIdsWithFallbacks.call(
-      [content_id],
-      locale_fallback_order: [locale, Edition::DEFAULT_LOCALE].uniq,
-      state_fallback_order: with_drafts ? %i[draft published withdrawn] : %i[published withdrawn],
+  def root_edition_resolver
+    @root_edition_resolver ||= LinkExpansion::RootEdition.new(
+      edition:, content_id:, locale:, with_drafts:,
     )
-    return nil if edition_ids.blank?
-
-    # Select unpublishings.type so EditionHash can derive `withdrawn` itself,
-    # the same way the batch SQL does for non-root editions.
-    Edition.with_document.with_unpublishing
-      .select("editions.*", 'unpublishings.type AS "unpublishings.type"')
-      .find_by(id: edition_ids.first)
   end
 end
