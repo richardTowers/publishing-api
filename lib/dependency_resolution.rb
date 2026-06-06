@@ -4,6 +4,9 @@
 #
 # The concept is documented in /docs/dependency-resolution.md
 #
+# This is a thin entry point; the traversal itself lives in
+# DependencyResolution::BreadthFirstResolver.
+#
 class DependencyResolution
   attr_reader :content_id, :locale, :with_drafts
 
@@ -14,15 +17,10 @@ class DependencyResolution
   end
 
   def dependencies
-    link_graph.links_content_ids
-  end
-
-  def link_graph
-    @link_graph ||= LinkGraph.new(
-      root_content_id: content_id,
-      root_locale: locale,
+    DependencyResolution::BreadthFirstResolver.new(
+      content_id,
+      locale:,
       with_drafts:,
-      link_reference: LinkReference.new,
-    )
+    ).dependencies
   end
 end

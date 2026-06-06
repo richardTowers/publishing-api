@@ -193,3 +193,30 @@ The main risk is subtle differences in ordering or deduplication between the old
 ### Dependency resolution no longer needs the link graph
 
 `DependencyResolution` currently uses a `LinkGraph` (meaning dependency resolution works the same as link expansion, just with a different `LinkReference`). After this change, dependency resolution uses a simpler BFS that only collects content_ids. The `DependencyResolution#link_graph` method (used for debugging in the rails console, as documented in `docs/dependency-resolution.md`) will no longer exist and should be replaced with equivalent debugging tooling.
+
+## Amendment: deviations discovered during implementation
+
+Two things in the plan above turned out not to hold once the work was done, and
+the implementation deviates accordingly:
+
+- **`Queries::Links` and `Queries::EditionLinks` are retained**, not removed
+  (contradicting "Implementation plan" step 6 and "Single source of truth for
+  link queries"). Dependency resolution must return a dependent's `content_id`
+  even when that content has no renderable edition, but the shared batch SQL
+  `INNER JOIN`s `editions`. So `DependencyResolution::BreadthFirstResolver`
+  reads the `links` table directly: the root reuses `Queries::Links` /
+  `Queries::EditionLinks`, and the recursive levels batch plain `links`-table
+  reads (link set links only, matching legacy). It therefore does **not** share
+  the two batch SQL files with link expansion ("Dependency resolution continues
+  to work" overstated the overlap).
+
+- **A `link_source` discriminator column was added to both batch SQL files.**
+  The expander needs to know whether each edition was reached via an edition
+  link to reproduce two legacy behaviours: not expanding the children of a node
+  reached via an edition link, and excluding edition-sourced reverse links at
+  child levels. The column is additive and ignored by the GraphQL dataloaders.
+
+The `LinkExpansion::EditionHash` class is also retained (used by
+`lib/graphql/auto_reverse_linker.rb` and the new expander), and parity was
+verified via the existing integration + GraphQL suites rather than a
+parallel-running shadow-compare phase.
