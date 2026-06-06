@@ -204,11 +204,30 @@ private
   # Attach the surviving editions for `link_type` into the parent's `links` hash
   # and push a frontier node for each so its own links expand. Emits no key when
   # nothing survives: an absent key is meaningful and distinct from an empty [].
+  # A node reached via an edition link is marked terminal so its children are not
+  # expanded.
   def attach(target, next_frontier, link_type, editions, child_reverse: false)
     survivors = survivors_for(editions, target.child_ancestors, child_reverse:)
     return if survivors.empty?
 
-    target.links[link_type] = attach_survivors(survivors, next_frontier, target, link_type)
+    # Each survivor's child_links hash is shared between its frontier Node and its
+    # emitted entry, so descendants attach into the tree top-down.
+    survivors_with_links = survivors.map { |edition| [edition, {}] }
+
+    survivors_with_links.each do |edition, child_links|
+      next_frontier << Node.new(
+        content_id: edition.content_id,
+        link_type:,
+        link_types_path: target.parent_path + [link_type],
+        ancestors: target.child_ancestors,
+        links: child_links,
+        terminal: edition_link_sourced?(edition),
+      )
+    end
+
+    target.links[link_type] = survivors_with_links.map do |edition, child_links|
+      expand_fields(edition, link_type).merge(links: child_links)
+    end
   end
 
   # The editions to actually attach. Per-path cycle pruning drops any whose
@@ -223,25 +242,6 @@ private
   def survivors_for(editions, child_ancestors, child_reverse:)
     editions = editions.reject { |edition| edition_link_sourced?(edition) } if child_reverse
     editions.reject { |edition| child_ancestors.include?(edition.content_id) }
-  end
-
-  # Build the emitted hash for each survivor and push its child frontier node.
-  # `child_links` is the same hash object in both the emitted tree and the Node,
-  # so descendants attach into the tree top-down. A node reached via an edition
-  # link is marked terminal so its children are not expanded.
-  def attach_survivors(survivors, next_frontier, target, link_type)
-    survivors.map do |edition|
-      child_links = {}
-      next_frontier << Node.new(
-        content_id: edition.content_id,
-        link_type:,
-        link_types_path: target.parent_path + [link_type],
-        ancestors: target.child_ancestors,
-        links: child_links,
-        terminal: edition_link_sourced?(edition),
-      )
-      expand_fields(edition, link_type).merge(links: child_links)
-    end
   end
 
   def edition_link_sourced?(edition)
