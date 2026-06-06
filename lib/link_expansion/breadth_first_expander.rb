@@ -238,16 +238,16 @@ private
   # --- auto_reverse_link ------------------------------------------------------
 
   def apply_auto_reverse_links(level_one_nodes)
-    hash = root_edition_hash
-    return unless hash
+    root_edition_hash = LinkExpansion::EditionHash.from(root_edition)
+    return unless root_edition_hash
 
     level_one_nodes.each do |node|
       reverse_type = node.link_type
       next unless rules.is_reverse_link_type?(reverse_type)
-      next unless should_link?(reverse_type, hash)
+      next unless should_link?(reverse_type, root_edition_hash)
 
       rules.reverse_to_direct_link_type(reverse_type).each do |direct|
-        expanded = rules.expand_fields(hash, link_type: direct, draft: with_drafts)
+        expanded = rules.expand_fields(root_edition_hash, link_type: direct, draft: with_drafts)
         node.links[direct] = [expanded.merge(links: {})]
       end
     end
@@ -283,14 +283,5 @@ private
     Edition.with_document.with_unpublishing
       .select("editions.*", 'unpublishings.type AS "unpublishings.type"')
       .find_by(id: edition_ids.first)
-  end
-
-  def root_edition_hash
-    return @root_edition_hash if defined?(@root_edition_hash)
-
-    # `withdrawn` is derived from root_edition's unpublishings.type column,
-    # selected by load_root_edition (by_content_id) or carried by the
-    # caller-supplied edition (by_edition).
-    @root_edition_hash = LinkExpansion::EditionHash.from(root_edition)
   end
 end
