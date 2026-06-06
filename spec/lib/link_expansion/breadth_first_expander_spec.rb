@@ -46,6 +46,48 @@ RSpec.describe LinkExpansion::BreadthFirstExpander do
     end
   end
 
+  # The order of link-type keys in the output hash is deliberately asymmetric:
+  # reverse-then-direct at the root, direct-then-reverse at every deeper level.
+  # This matches legacy link expansion and is observable by Content Store, but
+  # it is otherwise only implied by the order of two blocks in expand_root /
+  # expand_level. These tests pin it so a refactor that "tidies" the two methods
+  # into one shared loop (which would naturally make the orderings consistent)
+  # fails loudly rather than silently changing published output.
+  describe "output key ordering" do
+    it "orders root link types reverse-then-direct" do
+      org = create_link_set
+      child = create_link_set
+      create_edition(a, "/a", factory: :draft_edition)
+      create_edition(org, "/org", factory: :draft_edition)
+      create_edition(child, "/child", factory: :draft_edition)
+
+      create_link(a, org, "organisation") # a direct (link set) link from the root
+      create_link(child, a, "parent")     # child is a child of a => root has :children
+
+      expect(expand(a).keys).to eq(%i[children organisation])
+    end
+
+    it "orders child link types direct-then-reverse" do
+      taxon = create_link_set         # the root; left without an edition so the
+      child_taxon = create_link_set   # auto_reverse_link pass is skipped and the
+      associated = create_link_set    # child's keys reflect only expand_level
+      grandchild_taxon = create_link_set
+      create_edition(child_taxon, "/child-taxon", factory: :draft_edition)
+      create_edition(associated, "/associated", factory: :draft_edition)
+      create_edition(grandchild_taxon, "/grandchild-taxon", factory: :draft_edition)
+
+      # taxon -children-> child_taxon, reached via the reverse of parent_taxons
+      create_link(child_taxon, taxon, "parent_taxons")
+      # at [:child_taxons] both a direct (:associated_taxons) and a reverse
+      # (:child_taxons) link type are allowed; give the child_taxon one of each
+      create_link(child_taxon, associated, "associated_taxons")
+      create_link(grandchild_taxon, child_taxon, "parent_taxons")
+
+      child = expand(taxon).fetch(:child_taxons).first
+      expect(child[:links].keys).to eq(%i[associated_taxons child_taxons])
+    end
+  end
+
   describe "query count" do
     before do
       create_edition(a, "/a", factory: :draft_edition)
